@@ -76,7 +76,7 @@ class SparkPositionDeltaOperation implements RowLevelOperation, SupportsDelta {
           new SparkScanBuilder(spark, table, table.schema(), snapshot, branch, options) {
             @Override
             public Scan build() {
-              Scan scan = super.build();
+              Scan scan = super.buildMergeOnReadScan();
               SparkPositionDeltaOperation.this.configuredScan = scan;
               return scan;
             }
