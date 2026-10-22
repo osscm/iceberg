@@ -19,6 +19,7 @@
 package org.apache.iceberg.spark.extensions;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assumptions.assumeThat;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +36,7 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.functions;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -70,8 +72,15 @@ public class TestScalarIndexBenchmark extends ExtensionsTestBase {
 
   private static final Logger LOG = LoggerFactory.getLogger(TestScalarIndexBenchmark.class);
 
-  private static final long NUM_ROWS = 10_000_000L;
-  private static final int NUM_FILES = 200;
+  private static final long NUM_ROWS = envLong("SCALAR_BENCH_ROWS", 10_000_000L);
+  private static final int NUM_FILES = (int) envLong("SCALAR_BENCH_FILES", 200L);
+  // Restricts a run to one catalog (e.g. testhadoop); all catalogs run when unset.
+  private static final String ONLY_CATALOG = System.getenv("SCALAR_BENCH_CATALOG");
+  // Number of existing ids in the narrow range query of the colleague-series scenario. Rows are
+  // scattered round-robin, so a range of this many ids touches about this many files.
+  private static final long NARROW_RANGE_IDS = 28L;
+  // Share of rows spanned by the wide range query in the colleague-series scenario.
+  private static final long RANGE_ROWS_DIVISOR = 25L;
   private static final int RUNS = 3;
   // Number of consecutive ids spanned by the BETWEEN (range) query.
   private static final int RANGE_WIDTH = 20;
@@ -131,6 +140,18 @@ public class TestScalarIndexBenchmark extends ExtensionsTestBase {
               "SELECT * FROM %s WHERE part = 0 AND id BETWEEN %d AND %d",
               tableName, half, half + (long) RANGE_WIDTH * NUM_PARTITIONS - 1)
         });
+  }
+
+  private static long envLong(String name, long defaultValue) {
+    String value = System.getenv(name);
+    return value == null ? defaultValue : Long.parseLong(value.replace("_", ""));
+  }
+
+  @BeforeEach
+  public void selectCatalog() {
+    assumeThat(ONLY_CATALOG == null || ONLY_CATALOG.equals(catalogName))
+        .as("SCALAR_BENCH_CATALOG=%s", ONLY_CATALOG)
+        .isTrue();
   }
 
   @AfterEach
@@ -235,6 +256,58 @@ public class TestScalarIndexBenchmark extends ExtensionsTestBase {
 
     assertThat(indexed.get(0).recordsRead).isEqualTo(UNCOVERED_ROWS);
     assertThat(indexed.get(1).recordsRead).isEqualTo(UNCOVERED_ROWS);
+  }
+
+  /**
+   * Query shapes from the 30M-row, 643-file Bloom-vs-SCALAR comparison, on the single-column id
+   * index (the composite {@code pair_*} series are not reproducible on 4.0). Even ids only, so odd
+   * ids are absent but inside every file's bounds. The narrow range spans {@code NARROW_RANGE_IDS}
+   * existing ids, so it touches about that many files. The wide range spans {@code
+   * 1/RANGE_ROWS_DIVISOR} of the rows, which matches rows in every file so the index cannot prune,
+   * and is counted instead of collected so large runs do not pull millions of rows to the driver.
+   */
+  private List<String[]> colleagueSeriesCases() {
+    long maxId = 2 * NUM_ROWS;
+    long present = NUM_ROWS;
+    long rangeIds = 2 * (NUM_ROWS / RANGE_ROWS_DIVISOR);
+    return List.of(
+        new String[] {
+          "rand_id_eq_absent",
+          String.format("SELECT * FROM %s WHERE id = %d", tableName, present + 1)
+        },
+        new String[] {
+          "rand_id_eq_present",
+          String.format("SELECT * FROM %s WHERE id = %d", tableName, present)
+        },
+        new String[] {
+          "rand_id_in_3",
+          String.format(
+              "SELECT * FROM %s WHERE id IN (%d, %d, %d)",
+              tableName, maxId / 4, maxId / 2, 3 * maxId / 4)
+        },
+        new String[] {
+          "rand_id_range",
+          String.format(
+              "SELECT * FROM %s WHERE id BETWEEN %d AND %d",
+              tableName, present, present + 2 * NARROW_RANGE_IDS - 1)
+        },
+        new String[] {
+          "rand_id_range_wide",
+          String.format(
+              "SELECT count(*) FROM %s WHERE id BETWEEN %d AND %d",
+              tableName, present, present + rangeIds - 1)
+        });
+  }
+
+  @TestTemplate
+  public void benchmarkColleagueSeries() throws Exception {
+    createEvenIdTable();
+    List<Measurement> indexed =
+        runBenchmark(
+            "colleague-series", "files=" + NUM_FILES, "'id'", "IDENTITY", colleagueSeriesCases());
+
+    assertThat(indexed.get(0).recordsRead).as("absent key").isZero();
+    assertThat(indexed.get(1).recordsRead).as("present key").isPositive();
   }
 
   private void appendUncoveredFile() {
