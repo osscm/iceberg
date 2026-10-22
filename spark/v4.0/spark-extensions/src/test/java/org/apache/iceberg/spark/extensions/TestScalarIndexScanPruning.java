@@ -348,16 +348,20 @@ public class TestScalarIndexScanPruning extends ExtensionsTestBase {
         "CALL %s.system.build_scalar_index(table => '%s', columns => array('data'),"
             + " transform => 'HASH')",
         catalogName, tableIdent);
-    sql("INSERT INTO TABLE %s VALUES (4, 'ddd')", tableName);
+    // A single file, so its min/max bounds span both rows.
+    sql(
+        "INSERT INTO TABLE %s SELECT /*+ COALESCE(1) */ * FROM VALUES (4, 'ddd'), (5, 'fff')",
+        tableName);
 
     // Absent from the covered files, present in the uncovered one.
     List<Object[]> appended = sql("SELECT id FROM %s WHERE data = 'ddd'", tableName);
     assertThat(appended).extracting(r -> r[0]).containsExactly(4L);
     assertThat(plannedInputPartitions("data = 'ddd'")).isEqualTo(1);
 
-    // Absent everywhere: only the uncovered file is read.
-    assertThat(sql("SELECT id FROM %s WHERE data = 'does-not-exist'", tableName)).isEmpty();
-    assertThat(plannedInputPartitions("data = 'does-not-exist'")).isEqualTo(1);
+    // Absent everywhere, but within the uncovered file's min/max bounds so column stats cannot
+    // skip it: only the uncovered file is read.
+    assertThat(sql("SELECT id FROM %s WHERE data = 'eee'", tableName)).isEmpty();
+    assertThat(plannedInputPartitions("data = 'eee'")).isEqualTo(1);
   }
 
   private void createThreeFileTable() {
