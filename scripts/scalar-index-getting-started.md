@@ -96,11 +96,24 @@ SCALAR_BENCHMARK=true ./gradlew -DsparkVersions=4.0 -DscalaVersion=2.13 -DflinkV
   --tests "*TestScalarIndexBenchmark.benchmarkAbsentKey"
 ```
 
+Environment variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SCALAR_BENCHMARK` | unset | must be `true`, or the class is skipped |
+| `SCALAR_BENCH_ROWS` | `10000000` | row count (underscores allowed, e.g. `100_000_000`) |
+| `SCALAR_BENCH_FILES` | `200` | number of data files |
+| `SCALAR_BENCH_CATALOG` | unset (all four) | run one catalog only, e.g. `testhadoop` |
+
 Scenarios: `benchmarkUnpartitioned`, `benchmarkPartitioned`, `benchmarkAbsentKey`,
-`benchmarkAbsentKeyWithUncoveredFile` and `benchmarkUnpartitionedListingCacheOff`. The class also
-contains `benchmarkComposite`, copied from the 3.5 branch; it has not been run on 4.0 and composite
-indexes are not supported there, so skip it. Reports are written to
-`spark/v4.0/spark-extensions/build/scalar-index-benchmark-<catalog>-<scenario>.txt`.
+`benchmarkAbsentKeyWithUncoveredFile`, `benchmarkUnpartitionedListingCacheOff` and
+`benchmarkColleagueSeries`. The last runs five single-column queries on a table of even ids
+scattered across the files: absent and present equality, `IN` with 3 ids, a narrow range (28 ids,
+about 28 files) and a wide range (4% of rows, which touches every file so the index cannot prune).
+The class also contains `benchmarkComposite`, copied from the 3.5 branch; it has not been run on
+4.0 and composite indexes are not supported there, so skip it. Reports are written to
+`spark/v4.0/spark-extensions/build/scalar-index-benchmark-<catalog>-<scenario>.txt`, and each run
+overwrites the previous report for the same catalog and scenario.
 
 Records read is the most reliable signal. The harness runs on local disk with a warm cache, so it
 understates what the caches save against an object store, and wall-clock numbers vary between runs.
