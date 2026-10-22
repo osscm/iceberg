@@ -42,74 +42,78 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * A {@link BatchScan} decorator that constrains {@link #planFiles()} to a fixed set of data file
- * paths, resolved ahead of time from a SCALAR index by {@link SparkScanBuilder}.
+ * A {@link BatchScan} decorator that constrains {@link #planFiles()} to the data files a SCALAR
+ * index lookup resolved: the covered files with matching index entries plus the uncovered files
+ * added after the index's source snapshot. When both sets are empty, no file can contain a matching
+ * row and {@link #planFiles()} returns no tasks.
  *
- * <p>Only {@link #planFiles()} is overridden. Spark's own task planning ({@link
- * SparkPartitioningAwareScan}) calls only {@link #planFiles()}, never {@link #planTasks()}, so that
- * is the one place this filter needs to apply for a normal query. {@link #planTasks()} delegates
- * unfiltered -- callers that plan through it directly won't see the restriction, but since this is
- * purely an additive, sound restriction (the original predicate is still applied as a residual
- * regardless), an unfiltered {@link #planTasks()} only costs a missed optimization, not a wrong
- * result.
+ * <p>Only {@link #planFiles()} is restricted; Spark's task planning ({@link
+ * SparkPartitioningAwareScan}) calls only {@link #planFiles()}. {@link #planTasks()} delegates
+ * unfiltered, which only costs a missed optimization because the original predicate is still
+ * applied as a residual.
  *
- * <p>{@link #planFiles()} self-verifies before trusting the resolved paths: the index recorded file
- * paths at index-build time via Spark's {@code input_file_name()}, while this class matches them
- * against {@link org.apache.iceberg.DataFile#path()} as reported by normal scan planning -- two
- * different code paths that are expected to agree, but have not been verified to always agree
- * across every {@code FileIO} implementation and path-normalization scheme. If none of the resolved
- * paths match any real candidate file (a sign of exactly that kind of mismatch, not a genuine "no
- * files match"), this falls back to the full, unfiltered file list rather than risk silently
- * returning zero rows -- this optimization must never be able to produce a wrong result.
+ * <p>The matched paths were recorded by the index build through Spark's {@code input_file_name()},
+ * while planning reports {@link org.apache.iceberg.ContentFile#location()}. If the index matched
+ * files but none of them is among the planned files, the paths are assumed not to be comparable and
+ * the unfiltered file list is returned rather than risk dropping rows. Uncovered paths come from
+ * the table's own manifests.
  *
- * <p>Every other method delegates straight through to the wrapped scan. Refinement methods ( {@link
- * #filter}, {@link #select}, {@link #useSnapshot}, etc.) are not expected to be called on this
- * decorator in practice -- by the time {@link SparkScanBuilder} wraps a scan with this class, all
- * such refinement has already happened on the underlying scan -- so they delegate without
- * re-wrapping the result.
+ * <p>Every other method delegates to the wrapped scan without re-wrapping the result; refinement
+ * happens before {@link SparkScanBuilder} wraps the scan.
  */
 class FileScanTaskFilteringScan implements BatchScan {
 
   private static final Logger LOG = LoggerFactory.getLogger(FileScanTaskFilteringScan.class);
 
   private final BatchScan delegate;
-  private final Set<String> allowedFilePaths;
+  private final Set<String> matchedFilePaths;
+  private final Set<String> uncoveredFilePaths;
 
-  FileScanTaskFilteringScan(BatchScan delegate, Set<String> allowedFilePaths) {
-    Preconditions.checkArgument(
-        allowedFilePaths != null && !allowedFilePaths.isEmpty(),
-        "allowedFilePaths must be non-empty");
+  FileScanTaskFilteringScan(
+      BatchScan delegate, Set<String> matchedFilePaths, Set<String> uncoveredFilePaths) {
+    Preconditions.checkArgument(delegate != null, "Invalid delegate scan: null");
+    Preconditions.checkArgument(matchedFilePaths != null, "Invalid matched file paths: null");
+    Preconditions.checkArgument(uncoveredFilePaths != null, "Invalid uncovered file paths: null");
     this.delegate = delegate;
-    this.allowedFilePaths = allowedFilePaths;
+    this.matchedFilePaths = matchedFilePaths;
+    this.uncoveredFilePaths = uncoveredFilePaths;
   }
 
   @Override
   public CloseableIterable<ScanTask> planFiles() {
+    if (matchedFilePaths.isEmpty() && uncoveredFilePaths.isEmpty()) {
+      LOG.info("SCALAR index found no data file that can match, planning no tasks");
+      return CloseableIterable.empty();
+    }
+
     List<ScanTask> allTasks = Lists.newArrayList();
-    List<ScanTask> matchedTasks = Lists.newArrayList();
+    List<ScanTask> keptTasks = Lists.newArrayList();
+    boolean anyMatchedFilePlanned = false;
     try (CloseableIterable<ScanTask> tasks = delegate.planFiles()) {
       for (ScanTask task : tasks) {
         allTasks.add(task);
-        if (task instanceof FileScanTask
-            && allowedFilePaths.contains(((FileScanTask) task).file().location())) {
-          matchedTasks.add(task);
+        String location =
+            task instanceof FileScanTask ? ((FileScanTask) task).file().location() : null;
+        boolean matched = location != null && matchedFilePaths.contains(location);
+        anyMatchedFilePlanned |= matched;
+        if (matched || (location != null && uncoveredFilePaths.contains(location))) {
+          keptTasks.add(task);
         }
       }
     } catch (IOException e) {
-      throw new UncheckedIOException(e);
+      throw new UncheckedIOException("Failed to close planned file scan tasks", e);
     }
 
-    if (!allTasks.isEmpty() && matchedTasks.isEmpty()) {
+    if (!matchedFilePaths.isEmpty() && !anyMatchedFilePlanned && !allTasks.isEmpty()) {
       LOG.warn(
-          "SCALAR index resolved file paths {} matched none of the {} candidate file(s) from "
-              + "normal planning -- falling back to the unfiltered file set rather than risk "
-              + "returning zero rows",
-          allowedFilePaths,
+          "None of the {} data file(s) matched by the SCALAR index is among the {} planned file(s),"
+              + " falling back to the unfiltered file set",
+          matchedFilePaths.size(),
           allTasks.size());
       return CloseableIterable.withNoopClose(allTasks);
     }
 
-    return CloseableIterable.withNoopClose(matchedTasks);
+    return CloseableIterable.withNoopClose(keptTasks);
   }
 
   @Override

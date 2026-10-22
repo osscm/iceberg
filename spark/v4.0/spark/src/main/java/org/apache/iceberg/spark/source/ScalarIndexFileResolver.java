@@ -38,7 +38,7 @@ import org.apache.iceberg.index.TrackingFileEntry;
 import org.apache.iceberg.index.TrackingFileReader;
 import org.apache.iceberg.index.TransformFunction;
 import org.apache.iceberg.index.TransformFunctions;
-import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
@@ -54,7 +54,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Resolves the pushed-down filters of a batch scan against the table's SCALAR indexes, producing
- * the set of data file paths that can contain matching rows.
+ * the data files that can contain matching rows.
  *
  * <p>An equality predicate resolves to a single transform value and an {@code IN} predicate to one
  * transform value per literal. Range predicates ({@code <}, {@code <=}, {@code >}, {@code >=}) are
@@ -62,10 +62,13 @@ import org.slf4j.LoggerFactory;
  * every key column is constrained; its bounding transform-value range is derived from the corners
  * of the query box. Only the first index that resolves is used.
  *
- * <p>Files added to the table after the index's source snapshot ("uncovered" files) are always
- * included. Any failure, an ineligible predicate, a non-append snapshot between the index's source
- * snapshot and the snapshot being read, or a key column whose type no longer matches the type
- * stored in the index resolves to {@code null}, which means "plan normally".
+ * <p>A successful resolution contains the covered files with at least one matching index entry and
+ * the files added to the table after the index's source snapshot ("uncovered" files). Both sets can
+ * be empty, which means no file can contain a matching row. Resolution returns {@code null}, which
+ * means "plan normally", when there is no usable index, a predicate is ineligible, the candidate
+ * leaf-file bound is exceeded, a snapshot between the index's source snapshot and the snapshot
+ * being read is not an append, a query literal or the stored key type does not match the key
+ * column's type, or anything fails.
  */
 class ScalarIndexFileResolver {
 
@@ -102,10 +105,10 @@ class ScalarIndexFileResolver {
   }
 
   /**
-   * Returns the paths of the data files that can contain rows matching the filters when read at
-   * {@code readSnapshot}, or {@code null} if the scan must be planned normally.
+   * Returns the data files that can contain rows matching the filters when read at {@code
+   * readSnapshot}, or {@code null} if the scan must be planned normally.
    */
-  Set<String> resolve(Snapshot readSnapshot) {
+  Resolution resolve(Snapshot readSnapshot) {
     try {
       return resolveOrNull(readSnapshot);
     } catch (RuntimeException e) {
@@ -117,12 +120,12 @@ class ScalarIndexFileResolver {
     }
   }
 
-  private Set<String> resolveOrNull(Snapshot readSnapshot) {
+  private Resolution resolveOrNull(Snapshot readSnapshot) {
     if (readSnapshot == null || filters == null || filters.isEmpty()) {
       return null;
     }
 
-    Map<Integer, List<UnboundPredicate<?>>> predicatesByFieldId = candidatePredicatesByFieldId();
+    Map<Integer, List<KeyPredicate>> predicatesByFieldId = keyPredicatesByFieldId();
     if (predicatesByFieldId.isEmpty()) {
       return null;
     }
@@ -132,16 +135,16 @@ class ScalarIndexFileResolver {
       return null;
     }
 
-    Set<String> compositePaths = resolveComposite(indexes, predicatesByFieldId, readSnapshot);
-    if (compositePaths != null) {
-      return compositePaths;
+    Resolution composite = resolveComposite(indexes, predicatesByFieldId, readSnapshot);
+    if (composite != null) {
+      return composite;
     }
 
-    for (Map.Entry<Integer, List<UnboundPredicate<?>>> entry : predicatesByFieldId.entrySet()) {
-      Set<String> paths =
+    for (Map.Entry<Integer, List<KeyPredicate>> entry : predicatesByFieldId.entrySet()) {
+      Resolution resolution =
           resolveSingleColumn(indexes, entry.getKey(), entry.getValue(), readSnapshot);
-      if (paths != null) {
-        return paths;
+      if (resolution != null) {
+        return resolution;
       }
     }
 
@@ -163,9 +166,26 @@ class ScalarIndexFileResolver {
     }
   }
 
-  /** Groups the EQ, IN, and range predicates on top-level named columns by field ID. */
-  private Map<Integer, List<UnboundPredicate<?>>> candidatePredicatesByFieldId() {
-    Map<Integer, List<UnboundPredicate<?>>> predicatesByFieldId = Maps.newLinkedHashMap();
+  private List<TrackingFileEntry> readTrackingFile(String trackingFileLocation) {
+    return TrackingFileReader.readAll(table.io().newInputFile(trackingFileLocation));
+  }
+
+  private Type storedKeyType(TrackingFileEntry leaf, Types.NestedField keyField) {
+    return LeafFileReader.storedKeyType(newLeafInputFile(leaf), keyField);
+  }
+
+  private InputFile newLeafInputFile(TrackingFileEntry leaf) {
+    return table.io().newInputFile(leaf.location());
+  }
+
+  /**
+   * Groups the EQ, IN, and range predicates on top-level columns by field ID, with literals
+   * converted to the column type. A column with a literal that cannot be represented exactly in the
+   * column type is left out, so it is never resolved through an index.
+   */
+  private Map<Integer, List<KeyPredicate>> keyPredicatesByFieldId() {
+    Map<Integer, List<KeyPredicate>> predicatesByFieldId = Maps.newLinkedHashMap();
+    Set<Integer> ineligibleFieldIds = Sets.newHashSet();
     for (Expression expr : filters) {
       if (!(expr instanceof UnboundPredicate) || !PRUNABLE_OPS.contains(expr.op())) {
         continue;
@@ -177,13 +197,21 @@ class ScalarIndexFileResolver {
       }
 
       Types.NestedField field = findField(((NamedReference<?>) predicate.term()).name());
-      if (field != null) {
+      if (field == null) {
+        continue;
+      }
+
+      KeyPredicate keyPredicate = KeyPredicate.of(field, predicate);
+      if (keyPredicate == null) {
+        ineligibleFieldIds.add(field.fieldId());
+      } else {
         predicatesByFieldId
             .computeIfAbsent(field.fieldId(), id -> Lists.newArrayList())
-            .add(predicate);
+            .add(keyPredicate);
       }
     }
 
+    ineligibleFieldIds.forEach(predicatesByFieldId::remove);
     return predicatesByFieldId;
   }
 
@@ -191,11 +219,8 @@ class ScalarIndexFileResolver {
     return caseSensitive ? schema.findField(name) : schema.caseInsensitiveFindField(name);
   }
 
-  private Set<String> resolveSingleColumn(
-      List<IndexMetadata> indexes,
-      int fieldId,
-      List<UnboundPredicate<?>> predicates,
-      Snapshot readSnapshot) {
+  private Resolution resolveSingleColumn(
+      List<IndexMetadata> indexes, int fieldId, List<KeyPredicate> predicates, Snapshot snapshot) {
     IndexMetadata metadata = findSingleColumnIndex(indexes, fieldId);
     if (metadata == null) {
       return null;
@@ -208,7 +233,7 @@ class ScalarIndexFileResolver {
         return null;
       }
 
-      return resolveFilePaths(metadata, ImmutableList.of(keyField), resolved, readSnapshot);
+      return resolveFilePaths(metadata, ImmutableList.of(keyField), resolved, snapshot);
     } catch (RuntimeException e) {
       LOG.warn(
           "Failed to use SCALAR index on column {}, falling back to normal planning: {}",
@@ -230,15 +255,15 @@ class ScalarIndexFileResolver {
     return null;
   }
 
-  private Set<String> resolveComposite(
+  private Resolution resolveComposite(
       List<IndexMetadata> indexes,
-      Map<Integer, List<UnboundPredicate<?>>> predicatesByFieldId,
+      Map<Integer, List<KeyPredicate>> predicatesByFieldId,
       Snapshot readSnapshot) {
     for (IndexMetadata metadata : indexes) {
       if (SCALAR_INDEX_TYPE.equals(metadata.type()) && metadata.keyColumnIds().size() > 1) {
-        Set<String> paths = resolveComposite(metadata, predicatesByFieldId, readSnapshot);
-        if (paths != null) {
-          return paths;
+        Resolution resolution = resolveComposite(metadata, predicatesByFieldId, readSnapshot);
+        if (resolution != null) {
+          return resolution;
         }
       }
     }
@@ -246,9 +271,9 @@ class ScalarIndexFileResolver {
     return null;
   }
 
-  private Set<String> resolveComposite(
+  private Resolution resolveComposite(
       IndexMetadata metadata,
-      Map<Integer, List<UnboundPredicate<?>>> predicatesByFieldId,
+      Map<Integer, List<KeyPredicate>> predicatesByFieldId,
       Snapshot readSnapshot) {
     QueryBox box = queryBox(metadata, predicatesByFieldId);
     if (box == null) {
@@ -265,7 +290,8 @@ class ScalarIndexFileResolver {
               ImmutableList.of(
                   new TransformValueRange(Math.min(cornerA, cornerB), Math.max(cornerA, cornerB))),
               box.residual,
-              box.label);
+              box.label,
+              box.residual);
       return resolveFilePaths(metadata, box.keyFields, resolved, readSnapshot);
     } catch (RuntimeException e) {
       LOG.warn(
@@ -281,11 +307,11 @@ class ScalarIndexFileResolver {
    * is not bounded on both sides by the filters.
    */
   private QueryBox queryBox(
-      IndexMetadata metadata, Map<Integer, List<UnboundPredicate<?>>> predicatesByFieldId) {
+      IndexMetadata metadata, Map<Integer, List<KeyPredicate>> predicatesByFieldId) {
     QueryBox box = new QueryBox();
     for (int fieldId : metadata.keyColumnIds()) {
       Types.NestedField keyField = schema.findField(fieldId);
-      List<UnboundPredicate<?>> predicates = predicatesByFieldId.get(fieldId);
+      List<KeyPredicate> predicates = predicatesByFieldId.get(fieldId);
       if (keyField == null || predicates == null) {
         return null;
       }
@@ -302,10 +328,10 @@ class ScalarIndexFileResolver {
   }
 
   /**
-   * Reads the index's tracking file and candidate leaf files and returns the covered matching files
-   * plus any uncovered files, or {@code null} to plan normally.
+   * Reads the index's tracking file and candidate leaf files and returns the covered files with
+   * matches plus any uncovered files, or {@code null} to plan normally.
    */
-  private Set<String> resolveFilePaths(
+  private Resolution resolveFilePaths(
       IndexMetadata metadata,
       List<Types.NestedField> keyFields,
       ResolvedPredicate resolved,
@@ -315,9 +341,7 @@ class ScalarIndexFileResolver {
       return null;
     }
 
-    FileIO io = table.io();
-    List<TrackingFileEntry> trackedLeafFiles =
-        TrackingFileReader.readAll(io.newInputFile(indexSnapshot.trackingFile()));
+    List<TrackingFileEntry> trackedLeafFiles = readTrackingFile(indexSnapshot.trackingFile());
     if (keyTypeChanged(trackedLeafFiles, keyFields, resolved.label)) {
       return null;
     }
@@ -332,29 +356,23 @@ class ScalarIndexFileResolver {
       return null;
     }
 
-    List<LeafFileEntry> matches = Lists.newArrayList();
+    Set<String> matchedFilePaths = Sets.newHashSet();
     for (TrackingFileEntry leaf : candidateLeafFiles) {
-      matches.addAll(
-          LeafFileReader.readMatching(
-              io.newInputFile(leaf.location()), keyFields, resolved.leafFilter));
+      for (LeafFileEntry match :
+          LeafFileReader.readMatching(newLeafInputFile(leaf), keyFields, resolved.leafFilter)) {
+        matchedFilePaths.add(match.filePath());
+      }
     }
 
-    if (matches.isEmpty() && uncoveredFilePaths.isEmpty()) {
-      // Pruning to zero files is deliberately not attempted; the residual predicate still filters
-      // every row of a normal scan.
-      return null;
-    }
-
-    Set<String> resolvedPaths = Sets.newHashSet(uncoveredFilePaths);
-    matches.forEach(match -> resolvedPaths.add(match.filePath()));
     LOG.info(
-        "SCALAR index on {} resolved {} to {} file(s) ({} covered match(es), {} uncovered file(s))",
+        "SCALAR index on {} resolved {} to {} covered file(s) with matches and {} uncovered"
+            + " file(s) after reading {} leaf file(s)",
         resolved.label,
         resolved.description,
-        resolvedPaths.size(),
-        matches.size(),
-        uncoveredFilePaths.size());
-    return resolvedPaths;
+        matchedFilePaths.size(),
+        uncoveredFilePaths.size(),
+        candidateLeafFiles.size());
+    return new Resolution(matchedFilePaths, uncoveredFilePaths);
   }
 
   private Set<String> uncoveredFilePaths(IndexSnapshot indexSnapshot, Snapshot readSnapshot) {
@@ -399,8 +417,7 @@ class ScalarIndexFileResolver {
 
     TrackingFileEntry leaf = trackedLeafFiles.get(0);
     for (Types.NestedField keyField : keyFields) {
-      Type storedKeyType =
-          LeafFileReader.storedKeyType(table.io().newInputFile(leaf.location()), keyField);
+      Type storedKeyType = storedKeyType(leaf, keyField);
       if (!keyField.type().equals(storedKeyType)) {
         LOG.warn(
             "SCALAR index on {} was built for key column {} of type {} but the current schema has"
@@ -416,60 +433,37 @@ class ScalarIndexFileResolver {
     return false;
   }
 
-  private ResolvedPredicate resolvePredicates(
-      IndexMetadata metadata, Types.NestedField keyField, List<UnboundPredicate<?>> predicates) {
+  private static ResolvedPredicate resolvePredicates(
+      IndexMetadata metadata, Types.NestedField keyField, List<KeyPredicate> predicates) {
     TransformFunction transform =
         TransformFunctions.forName(metadata.transformFunction(), metadata.properties());
-    for (UnboundPredicate<?> predicate : predicates) {
-      if (predicate.op() == Expression.Operation.EQ) {
-        return resolveEq(transform, keyField, predicate.literal().value());
-      }
-    }
-
-    for (UnboundPredicate<?> predicate : predicates) {
-      if (predicate.op() == Expression.Operation.IN) {
-        return resolveIn(transform, keyField, predicate.literals());
+    for (KeyPredicate predicate : predicates) {
+      if (predicate.op == Expression.Operation.EQ || predicate.op == Expression.Operation.IN) {
+        return resolvePoints(transform, keyField, predicate);
       }
     }
 
     return resolveRange(transform, keyField, predicates);
   }
 
-  private static ResolvedPredicate resolveEq(
-      TransformFunction transform, Types.NestedField keyField, Object value) {
-    long transformValue = transform.transform(ImmutableList.of(value));
-    return new ResolvedPredicate(
-        ImmutableList.of(new TransformValueRange(transformValue, transformValue)),
-        Expressions.equal(keyField.name(), value),
-        keyField.name(),
-        value);
-  }
-
-  private static ResolvedPredicate resolveIn(
-      TransformFunction transform,
-      Types.NestedField keyField,
-      List<? extends Literal<?>> literals) {
-    if (literals.isEmpty()) {
+  private static ResolvedPredicate resolvePoints(
+      TransformFunction transform, Types.NestedField keyField, KeyPredicate predicate) {
+    if (predicate.values.isEmpty()) {
       return null;
     }
 
-    List<Object> values = Lists.newArrayListWithExpectedSize(literals.size());
-    List<TransformValueRange> ranges = Lists.newArrayListWithExpectedSize(literals.size());
-    for (Literal<?> literal : literals) {
-      Object value = literal.value();
+    List<TransformValueRange> ranges = Lists.newArrayListWithExpectedSize(predicate.values.size());
+    for (Object value : predicate.values) {
       long transformValue = transform.transform(ImmutableList.of(value));
-      values.add(value);
       ranges.add(new TransformValueRange(transformValue, transformValue));
     }
 
     return new ResolvedPredicate(
-        ranges, Expressions.in(keyField.name(), values), keyField.name(), values);
+        ranges, predicate.toExpression(keyField.name()), keyField.name(), predicate.values);
   }
 
   private static ResolvedPredicate resolveRange(
-      TransformFunction transform,
-      Types.NestedField keyField,
-      List<UnboundPredicate<?>> predicates) {
+      TransformFunction transform, Types.NestedField keyField, List<KeyPredicate> predicates) {
     // Only order-preserving transforms map a range on the column to a contiguous range of
     // transform values; HASH scatters values across buckets.
     if (!transform.supportsRangePredicates()) {
@@ -479,10 +473,9 @@ class ScalarIndexFileResolver {
     long lowerBound = Long.MIN_VALUE;
     long upperBound = Long.MAX_VALUE;
     Expression leafFilter = Expressions.alwaysTrue();
-    for (UnboundPredicate<?> predicate : predicates) {
-      long value = ((Number) predicate.literal().value()).longValue();
-      if (predicate.op() == Expression.Operation.GT
-          || predicate.op() == Expression.Operation.GT_EQ) {
+    for (KeyPredicate predicate : predicates) {
+      long value = ((Number) predicate.value()).longValue();
+      if (predicate.isLowerBound()) {
         // Inclusive even for GT: the tracking-file range only needs to be a superset, the exact
         // predicate is re-applied to the leaf entries.
         lowerBound = Math.max(lowerBound, value);
@@ -490,10 +483,7 @@ class ScalarIndexFileResolver {
         upperBound = Math.min(upperBound, value);
       }
 
-      leafFilter =
-          Expressions.and(
-              leafFilter,
-              Expressions.predicate(predicate.op(), keyField.name(), predicate.literal()));
+      leafFilter = Expressions.and(leafFilter, predicate.toExpression(keyField.name()));
     }
 
     if (lowerBound > upperBound) {
@@ -511,28 +501,30 @@ class ScalarIndexFileResolver {
    * Derives a bounded {@code [lower, upper]} for one key column of a composite query box, or {@code
    * null} if the column is not bounded on both sides.
    */
-  private static ColumnBound columnBound(List<UnboundPredicate<?>> predicates) {
-    for (UnboundPredicate<?> predicate : predicates) {
-      if (predicate.op() == Expression.Operation.EQ) {
-        Object value = predicate.literal().value();
-        return new ColumnBound(value, value);
+  private static ColumnBound columnBound(List<KeyPredicate> predicates) {
+    for (KeyPredicate predicate : predicates) {
+      if (predicate.op == Expression.Operation.EQ || predicate.op == Expression.Operation.IN) {
+        return pointsBound(predicate.values);
       }
     }
 
-    for (UnboundPredicate<?> predicate : predicates) {
-      if (predicate.op() == Expression.Operation.IN) {
-        return inBound(predicate.literals());
+    Object lower = null;
+    Object upper = null;
+    for (KeyPredicate predicate : predicates) {
+      if (predicate.isLowerBound()) {
+        lower = predicate.value();
+      } else {
+        upper = predicate.value();
       }
     }
 
-    return rangeBound(predicates);
+    return lower == null || upper == null ? null : new ColumnBound(lower, upper);
   }
 
-  private static ColumnBound inBound(List<? extends Literal<?>> literals) {
+  private static ColumnBound pointsBound(List<Object> values) {
     Object min = null;
     Object max = null;
-    for (Literal<?> literal : literals) {
-      Object value = literal.value();
+    for (Object value : values) {
       if (min == null || compareValues(value, min) < 0) {
         min = value;
       }
@@ -545,36 +537,9 @@ class ScalarIndexFileResolver {
     return min == null ? null : new ColumnBound(min, max);
   }
 
-  private static ColumnBound rangeBound(List<UnboundPredicate<?>> predicates) {
-    Object lower = null;
-    Object upper = null;
-    for (UnboundPredicate<?> predicate : predicates) {
-      if (predicate.op() == Expression.Operation.GT
-          || predicate.op() == Expression.Operation.GT_EQ) {
-        lower = predicate.literal().value();
-      } else if (predicate.op() == Expression.Operation.LT
-          || predicate.op() == Expression.Operation.LT_EQ) {
-        upper = predicate.literal().value();
-      }
-    }
-
-    return lower == null || upper == null ? null : new ColumnBound(lower, upper);
-  }
-
   @SuppressWarnings("unchecked")
   private static int compareValues(Object left, Object right) {
     return ((Comparable<Object>) left).compareTo(right);
-  }
-
-  /** Returns a copy of {@code predicate} that references {@code name}. */
-  private static Expression rename(UnboundPredicate<?> predicate, String name) {
-    if (predicate.op() == Expression.Operation.IN) {
-      List<Object> values = Lists.newArrayList();
-      predicate.literals().forEach(literal -> values.add(literal.value()));
-      return Expressions.in(name, values);
-    }
-
-    return Expressions.predicate(predicate.op(), name, predicate.literal());
   }
 
   /**
@@ -596,6 +561,27 @@ class ScalarIndexFileResolver {
     return Lists.newArrayList(byLocation.values());
   }
 
+  /** The data files an index lookup resolved to. */
+  static class Resolution {
+    private final Set<String> matchedFilePaths;
+    private final Set<String> uncoveredFilePaths;
+
+    Resolution(Set<String> matchedFilePaths, Set<String> uncoveredFilePaths) {
+      this.matchedFilePaths = ImmutableSet.copyOf(matchedFilePaths);
+      this.uncoveredFilePaths = ImmutableSet.copyOf(uncoveredFilePaths);
+    }
+
+    /** Paths of the covered data files that contain at least one matching index entry. */
+    Set<String> matchedFilePaths() {
+      return matchedFilePaths;
+    }
+
+    /** Paths of the data files added after the index's source snapshot. */
+    Set<String> uncoveredFilePaths() {
+      return uncoveredFilePaths;
+    }
+  }
+
   /** An inclusive range of transform values to look up in the tracking file. */
   static class TransformValueRange {
     private final long min;
@@ -615,6 +601,77 @@ class ScalarIndexFileResolver {
     }
   }
 
+  /** A pushed-down predicate on a key column with literals converted to the column type. */
+  private static class KeyPredicate {
+    private final Expression.Operation op;
+    private final List<Object> values;
+
+    private KeyPredicate(Expression.Operation op, List<Object> values) {
+      this.op = op;
+      this.values = values;
+    }
+
+    /** Returns null if a literal cannot be represented exactly in the field's type. */
+    private static KeyPredicate of(Types.NestedField field, UnboundPredicate<?> predicate) {
+      List<? extends Literal<?>> literals =
+          predicate.op() == Expression.Operation.IN
+              ? predicate.literals()
+              : ImmutableList.of(predicate.literal());
+      List<Object> values = Lists.newArrayListWithExpectedSize(literals.size());
+      for (Literal<?> literal : literals) {
+        Object value = keyValue(field.type(), literal);
+        if (value == null) {
+          return null;
+        }
+
+        values.add(value);
+      }
+
+      return new KeyPredicate(predicate.op(), values);
+    }
+
+    private static Object keyValue(Type type, Literal<?> literal) {
+      if (!type.isPrimitiveType()) {
+        return null;
+      }
+
+      Literal<?> converted = literal.to(type);
+      if (converted == null) {
+        return null;
+      }
+
+      Object value;
+      try {
+        value = converted.value();
+      } catch (UnsupportedOperationException e) {
+        // AboveMax or BelowMin: the literal is outside the range of the column type.
+        return null;
+      }
+
+      if (value instanceof CharSequence) {
+        value = value.toString();
+      }
+
+      return type.typeId().javaClass().isInstance(value) ? value : null;
+    }
+
+    private Object value() {
+      return values.get(0);
+    }
+
+    private boolean isLowerBound() {
+      return op == Expression.Operation.GT || op == Expression.Operation.GT_EQ;
+    }
+
+    private Expression toExpression(String name) {
+      if (op == Expression.Operation.IN) {
+        return Expressions.in(name, values);
+      }
+
+      return Expressions.predicate(op, name, values.get(0));
+    }
+  }
+
   /** Target transform-value ranges and the exact leaf-entry filter resolved from predicates. */
   private static class ResolvedPredicate {
     private final List<TransformValueRange> targetRanges;
@@ -631,11 +688,6 @@ class ScalarIndexFileResolver {
       this.leafFilter = leafFilter;
       this.label = label;
       this.description = description;
-    }
-
-    private ResolvedPredicate(
-        List<TransformValueRange> targetRanges, Expression leafFilter, String label) {
-      this(targetRanges, leafFilter, label, leafFilter);
     }
   }
 
@@ -659,14 +711,13 @@ class ScalarIndexFileResolver {
     private Expression residual = Expressions.alwaysTrue();
     private String label = "";
 
-    private void add(
-        Types.NestedField keyField, ColumnBound bound, List<UnboundPredicate<?>> predicates) {
+    private void add(Types.NestedField keyField, ColumnBound bound, List<KeyPredicate> predicates) {
       keyFields.add(keyField);
       lowerCorner.add(bound.lower);
       upperCorner.add(bound.upper);
       columnNames.add(keyField.name());
-      for (UnboundPredicate<?> predicate : predicates) {
-        this.residual = Expressions.and(residual, rename(predicate, keyField.name()));
+      for (KeyPredicate predicate : predicates) {
+        this.residual = Expressions.and(residual, predicate.toExpression(keyField.name()));
       }
 
       this.label = String.join(",", columnNames);

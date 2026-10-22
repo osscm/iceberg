@@ -88,7 +88,7 @@ public class TestFileScanTaskFilteringScan {
   public void planFilesReturnsOnlyAllowedPaths() throws IOException {
     BatchScan scan = table.newBatchScan();
     FileScanTaskFilteringScan filtered =
-        new FileScanTaskFilteringScan(scan, ImmutableSet.of(fileB.location()));
+        new FileScanTaskFilteringScan(scan, ImmutableSet.of(fileB.location()), ImmutableSet.of());
 
     try (CloseableIterable<ScanTask> tasks = filtered.planFiles()) {
       ScanTask onlyTask = Iterables.getOnlyElement(tasks);
@@ -101,7 +101,8 @@ public class TestFileScanTaskFilteringScan {
   public void planFilesMatchesMultipleAllowedPaths() throws IOException {
     BatchScan scan = table.newBatchScan();
     FileScanTaskFilteringScan filtered =
-        new FileScanTaskFilteringScan(scan, ImmutableSet.of(fileA.location(), fileC.location()));
+        new FileScanTaskFilteringScan(
+            scan, ImmutableSet.of(fileA.location(), fileC.location()), ImmutableSet.of());
 
     try (CloseableIterable<ScanTask> tasks = filtered.planFiles()) {
       assertThat(tasks)
@@ -117,7 +118,64 @@ public class TestFileScanTaskFilteringScan {
     // must never be interpreted as "prune everything to zero rows."
     BatchScan scan = table.newBatchScan();
     FileScanTaskFilteringScan filtered =
-        new FileScanTaskFilteringScan(scan, ImmutableSet.of("/some/path/that/does-not-exist"));
+        new FileScanTaskFilteringScan(
+            scan, ImmutableSet.of("/some/path/that/does-not-exist"), ImmutableSet.of());
+
+    try (CloseableIterable<ScanTask> tasks = filtered.planFiles()) {
+      assertThat(tasks)
+          .extracting(task -> ((FileScanTask) task).file().location())
+          .containsExactlyInAnyOrder(fileA.location(), fileB.location(), fileC.location());
+    }
+  }
+
+  @Test
+  public void planFilesReturnsNoTasksWhenNothingCanMatch() throws IOException {
+    BatchScan scan = table.newBatchScan();
+    FileScanTaskFilteringScan filtered =
+        new FileScanTaskFilteringScan(scan, ImmutableSet.of(), ImmutableSet.of());
+
+    try (CloseableIterable<ScanTask> tasks = filtered.planFiles()) {
+      assertThat(tasks).isEmpty();
+    }
+  }
+
+  @Test
+  public void planFilesKeepsOnlyUncoveredFilesWhenNoCoveredFileMatches() throws IOException {
+    BatchScan scan = table.newBatchScan();
+    FileScanTaskFilteringScan filtered =
+        new FileScanTaskFilteringScan(scan, ImmutableSet.of(), ImmutableSet.of(fileC.location()));
+
+    try (CloseableIterable<ScanTask> tasks = filtered.planFiles()) {
+      assertThat(tasks)
+          .extracting(task -> ((FileScanTask) task).file().location())
+          .containsExactly(fileC.location());
+    }
+  }
+
+  @Test
+  public void planFilesKeepsMatchedAndUncoveredFiles() throws IOException {
+    BatchScan scan = table.newBatchScan();
+    FileScanTaskFilteringScan filtered =
+        new FileScanTaskFilteringScan(
+            scan, ImmutableSet.of(fileA.location()), ImmutableSet.of(fileC.location()));
+
+    try (CloseableIterable<ScanTask> tasks = filtered.planFiles()) {
+      assertThat(tasks)
+          .extracting(task -> ((FileScanTask) task).file().location())
+          .containsExactlyInAnyOrder(fileA.location(), fileC.location());
+    }
+  }
+
+  @Test
+  public void planFilesFallsBackWhenMatchedPathsAreNotComparable() throws IOException {
+    // The uncovered file is planned, but none of the index-matched paths is: the matched paths
+    // must not be silently dropped.
+    BatchScan scan = table.newBatchScan();
+    FileScanTaskFilteringScan filtered =
+        new FileScanTaskFilteringScan(
+            scan,
+            ImmutableSet.of("/some/path/that/does-not-exist"),
+            ImmutableSet.of(fileC.location()));
 
     try (CloseableIterable<ScanTask> tasks = filtered.planFiles()) {
       assertThat(tasks)
@@ -130,7 +188,7 @@ public class TestFileScanTaskFilteringScan {
   public void otherMethodsDelegateUnchanged() {
     BatchScan scan = table.newBatchScan();
     FileScanTaskFilteringScan filtered =
-        new FileScanTaskFilteringScan(scan, ImmutableSet.of(fileB.location()));
+        new FileScanTaskFilteringScan(scan, ImmutableSet.of(fileB.location()), ImmutableSet.of());
 
     assertThat(filtered.schema()).isEqualTo(scan.schema());
     assertThat(filtered.table()).isEqualTo(scan.table());

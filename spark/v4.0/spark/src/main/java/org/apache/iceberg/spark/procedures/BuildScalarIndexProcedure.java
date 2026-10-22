@@ -55,6 +55,7 @@ import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.spark.IndexSnapshotUtil;
 import org.apache.iceberg.spark.Spark3Util;
 import org.apache.iceberg.spark.SparkIndexCatalogs;
+import org.apache.iceberg.spark.SparkReadOptions;
 import org.apache.iceberg.spark.procedures.SparkProcedures.ProcedureBuilder;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
@@ -265,8 +266,17 @@ class BuildScalarIndexProcedure extends BaseProcedure {
       Column transformValueCol,
       List<String> keyColumnNames,
       Map<String, String> options) {
+    Preconditions.checkArgument(
+        table.currentSnapshot() != null, "Cannot build an index on a table without snapshots");
+    // Read exactly the snapshot recorded as the index's source snapshot: a pruned scan trusts the
+    // index to cover every row of that snapshot, so a concurrent commit must not leak in here.
+    long sourceSnapshotId = table.currentSnapshot().snapshotId();
     String tableName = Spark3Util.quotedFullIdentifier(tableCatalog().name(), tableIdent);
-    Dataset<Row> sourceDf = spark().read().table(tableName);
+    Dataset<Row> sourceDf =
+        spark()
+            .read()
+            .option(SparkReadOptions.SNAPSHOT_ID, String.valueOf(sourceSnapshotId))
+            .table(tableName);
 
     int targetLeafFiles = Integer.parseInt(options.getOrDefault("target-leaf-files", "4"));
     String indexLocation =
@@ -299,7 +309,7 @@ class BuildScalarIndexProcedure extends BaseProcedure {
     committer.commit(
         indexIdent,
         table.uuid().toString(),
-        table.currentSnapshot().snapshotId(),
+        sourceSnapshotId,
         "SCALAR",
         upperTransform,
         keyColumnIds(keyFields),
@@ -386,7 +396,11 @@ class BuildScalarIndexProcedure extends BaseProcedure {
 
     String tableName = Spark3Util.quotedFullIdentifier(tableCatalog().name(), tableIdent);
     Dataset<Row> newRowsDf =
-        spark().read().table(tableName).filter(input_file_name().isInCollection(addedFilePaths));
+        spark()
+            .read()
+            .option(SparkReadOptions.SNAPSHOT_ID, String.valueOf(currentTableSnapshotId))
+            .table(tableName)
+            .filter(input_file_name().isInCollection(addedFilePaths));
 
     int targetLeafFiles = Integer.parseInt(options.getOrDefault("target-leaf-files", "4"));
     String leafDataLocation = existing.location() + "/data";

@@ -22,6 +22,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 import org.apache.iceberg.ParameterizedTestExtension;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.execution.SparkPlan;
+import org.apache.spark.sql.execution.datasources.v2.BatchScanExec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -306,5 +310,87 @@ public class TestScalarIndexScanPruning extends ExtensionsTestBase {
     assertThat(result).hasSize(1);
     assertThat(result.get(0)[0]).isEqualTo(2L);
     assertThat(result.get(0)[1]).isEqualTo("bbb");
+  }
+
+  @TestTemplate
+  public void absentKeyPrunesToNoFiles() {
+    createThreeFileTable();
+    sql(
+        "CALL %s.system.build_scalar_index(table => '%s', columns => array('data'),"
+            + " transform => 'HASH')",
+        catalogName, tableIdent);
+
+    assertPrunedToNoFiles("data = 'does-not-exist'", "concat(data, '') = 'does-not-exist'");
+    assertPrunedToNoFiles(
+        "data IN ('missing-1', 'missing-2')", "concat(data, '') IN ('missing-1', 'missing-2')");
+    assertThat(plannedInputPartitions("data = 'bbb'")).isEqualTo(1);
+  }
+
+  @TestTemplate
+  public void absentCompositeKeyPrunesToNoFiles() {
+    createThreeFileTable();
+    sql(
+        "CALL %s.system.build_scalar_index(table => '%s', columns => array('id', 'data'),"
+            + " transform => 'ZORDER')",
+        catalogName, tableIdent);
+
+    assertPrunedToNoFiles(
+        "id = 2 AND data = 'does-not-exist'", "id + 0 = 2 AND concat(data, '') = 'does-not-exist'");
+    assertPrunedToNoFiles(
+        "id IN (1, 3) AND data IN ('missing-1', 'missing-2')",
+        "id + 0 IN (1, 3) AND concat(data, '') IN ('missing-1', 'missing-2')");
+  }
+
+  @TestTemplate
+  public void absentKeyStillReadsFilesAppendedAfterTheIndex() {
+    createThreeFileTable();
+    sql(
+        "CALL %s.system.build_scalar_index(table => '%s', columns => array('data'),"
+            + " transform => 'HASH')",
+        catalogName, tableIdent);
+    sql("INSERT INTO TABLE %s VALUES (4, 'ddd')", tableName);
+
+    // Absent from the covered files, present in the uncovered one.
+    List<Object[]> appended = sql("SELECT id FROM %s WHERE data = 'ddd'", tableName);
+    assertThat(appended).extracting(r -> r[0]).containsExactly(4L);
+    assertThat(plannedInputPartitions("data = 'ddd'")).isEqualTo(1);
+
+    // Absent everywhere: only the uncovered file is read.
+    assertThat(sql("SELECT id FROM %s WHERE data = 'does-not-exist'", tableName)).isEmpty();
+    assertThat(plannedInputPartitions("data = 'does-not-exist'")).isEqualTo(1);
+  }
+
+  private void createThreeFileTable() {
+    // A file open cost above the split size plans every data file as its own input partition, so
+    // the partition count is the number of files read.
+    sql(
+        "CREATE TABLE %s (id bigint NOT NULL, data string) USING iceberg"
+            + " TBLPROPERTIES ('read.split.open-file-cost' = '1073741824')",
+        tableName);
+    sql("INSERT INTO TABLE %s VALUES (1, 'aaa')", tableName);
+    sql("INSERT INTO TABLE %s VALUES (2, 'bbb')", tableName);
+    sql("INSERT INTO TABLE %s VALUES (3, 'ccc')", tableName);
+  }
+
+  /**
+   * Asserts that {@code indexedPredicate} plans no input partitions and returns the same rows as
+   * {@code equivalentPredicate}, which is equivalent but cannot be resolved through an index.
+   */
+  private void assertPrunedToNoFiles(String indexedPredicate, String equivalentPredicate) {
+    List<Object[]> expected =
+        sql("SELECT id, data FROM %s WHERE %s ORDER BY id", tableName, equivalentPredicate);
+    List<Object[]> actual =
+        sql("SELECT id, data FROM %s WHERE %s ORDER BY id", tableName, indexedPredicate);
+
+    assertEquals("Pruned scan must match the unpruned result", expected, actual);
+    assertThat(actual).isEmpty();
+    assertThat(plannedInputPartitions(indexedPredicate)).isZero();
+  }
+
+  private int plannedInputPartitions(String predicate) {
+    Dataset<Row> df = spark.sql(String.format("SELECT id FROM %s WHERE %s", tableName, predicate));
+    List<SparkPlan> scans = SparkPlanUtil.collectBatchScans(df.queryExecution().executedPlan());
+    assertThat(scans).hasSize(1);
+    return ((BatchScanExec) scans.get(0)).scan().toBatch().planInputPartitions().length;
   }
 }

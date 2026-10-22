@@ -107,7 +107,7 @@ public class SparkScanBuilder
   private Integer limit = null;
   private ScalarIndexFileResolver scalarIndexResolver = null;
   private boolean scalarIndexResolved = false;
-  private Set<String> scalarIndexFilePaths = null;
+  private ScalarIndexFileResolver.Resolution scalarIndexResolution = null;
 
   SparkScanBuilder(
       SparkSession spark,
@@ -206,7 +206,7 @@ public class SparkScanBuilder
             ? new ScalarIndexFileResolver(table, schema, caseSensitive, expressions)
             : null;
     this.scalarIndexResolved = false;
-    this.scalarIndexFilePaths = null;
+    this.scalarIndexResolution = null;
   }
 
   private boolean unpartitioned() {
@@ -442,19 +442,25 @@ public class SparkScanBuilder
     }
 
     BatchScan batchScan = (BatchScan) scan;
-    Set<String> filePaths = scalarIndexFilePaths(batchScan);
-    return filePaths != null ? new FileScanTaskFilteringScan(batchScan, filePaths) : scan;
+    ScalarIndexFileResolver.Resolution resolution = scalarIndexResolution(batchScan);
+    if (resolution == null) {
+      return scan;
+    }
+
+    // An empty resolution is not a fallback: no data file can match, so no task is planned.
+    return new FileScanTaskFilteringScan(
+        batchScan, resolution.matchedFilePaths(), resolution.uncoveredFilePaths());
   }
 
-  private Set<String> scalarIndexFilePaths(BatchScan scan) {
+  private ScalarIndexFileResolver.Resolution scalarIndexResolution(BatchScan scan) {
     if (!scalarIndexResolved) {
       // Resolved against the snapshot the scan reads (time travel, branch, or tag) rather than
       // the table's current snapshot, and memoized because Spark calls build() more than once.
-      this.scalarIndexFilePaths = scalarIndexResolver.resolve(scan.snapshot());
+      this.scalarIndexResolution = scalarIndexResolver.resolve(scan.snapshot());
       this.scalarIndexResolved = true;
     }
 
-    return scalarIndexFilePaths;
+    return scalarIndexResolution;
   }
 
   private org.apache.iceberg.Scan buildIcebergBatchScan(boolean withStats, Schema expectedSchema) {
