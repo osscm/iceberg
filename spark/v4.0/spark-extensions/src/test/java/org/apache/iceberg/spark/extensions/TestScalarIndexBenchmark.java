@@ -36,6 +36,7 @@ import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.functions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,16 +52,19 @@ import org.slf4j.LoggerFactory;
  * signals here are Spark task input metrics (bytes/records read, which drop when {@code
  * FileScanTaskFilteringScan} returns fewer tasks) and wall-clock.
  *
- * <p>Intentionally kept out of version control / not committed: it writes a million rows and is far
- * too slow for the normal suite. Run it explicitly:
+ * <p>Disabled unless the {@code SCALAR_BENCHMARK} environment variable is {@code true}: it writes
+ * ten million rows per scenario and catalog, which is far too slow for the normal suite. Run it
+ * explicitly:
  *
  * <pre>
- *   ./gradlew :iceberg-spark:iceberg-spark-extensions-3.5_2.13:test \
+ *   SCALAR_BENCHMARK=true ./gradlew :iceberg-spark:iceberg-spark-extensions-4.0_2.13:test --rerun \
  *     --tests "org.apache.iceberg.spark.extensions.TestScalarIndexBenchmark"
  * </pre>
  *
- * Results are logged and also written to {@code build/scalar-index-benchmark-&lt;catalog&gt;.txt}.
+ * Results are logged and also written to {@code
+ * build/scalar-index-benchmark-&lt;catalog&gt;-&lt;scenario&gt;.txt}.
  */
+@EnabledIfEnvironmentVariable(named = "SCALAR_BENCHMARK", matches = "true")
 @ExtendWith(ParameterizedTestExtension.class)
 public class TestScalarIndexBenchmark extends ExtensionsTestBase {
 
