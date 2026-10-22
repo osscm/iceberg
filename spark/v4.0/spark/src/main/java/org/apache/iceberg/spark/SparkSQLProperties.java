@@ -131,4 +131,9 @@ public class SparkSQLProperties {
   // This determines how many rows are buffered before inferring shredded schema
   public static final String VARIANT_INFERENCE_BUFFER_SIZE =
       "spark.sql.iceberg.variant-inference-buffer-size";
+
+  // Controls how long a table's SCALAR index listing is reused on the driver; 0 disables caching
+  public static final String SCALAR_INDEX_LISTING_CACHE_TTL_MS =
+      "spark.sql.iceberg.scalar-index.listing-cache-ttl-ms";
+  public static final long SCALAR_INDEX_LISTING_CACHE_TTL_MS_DEFAULT = 30_000L;
 }

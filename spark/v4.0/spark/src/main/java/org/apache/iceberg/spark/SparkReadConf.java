@@ -421,4 +421,12 @@ public class SparkReadConf {
         .defaultValue(SparkSQLProperties.REPORT_COLUMN_STATS_DEFAULT)
         .parse();
   }
+
+  public long scalarIndexListingCacheTtlMs() {
+    return confParser
+        .longConf()
+        .sessionConf(SparkSQLProperties.SCALAR_INDEX_LISTING_CACHE_TTL_MS)
+        .defaultValue(SparkSQLProperties.SCALAR_INDEX_LISTING_CACHE_TTL_MS_DEFAULT)
+        .parse();
+  }
 }

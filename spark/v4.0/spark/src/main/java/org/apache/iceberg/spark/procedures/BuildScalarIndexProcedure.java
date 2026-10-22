@@ -174,6 +174,8 @@ class BuildScalarIndexProcedure extends BaseProcedure {
         table -> {
           BuildResult result =
               buildAndCommit(tableIdent, table, keyColumnNames, transformName, options);
+          // Queries in this process see the new index without waiting for the listing TTL.
+          SparkIndexCatalogs.get().invalidateIndexes(table);
           return asScanIterator(OUTPUT_TYPE, toOutputRows(result));
         });
   }

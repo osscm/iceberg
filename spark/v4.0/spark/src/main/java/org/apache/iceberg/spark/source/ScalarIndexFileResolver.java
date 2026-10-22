@@ -21,10 +21,10 @@ package org.apache.iceberg.spark.source;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.expressions.Literal;
@@ -35,9 +35,9 @@ import org.apache.iceberg.index.IndexSnapshot;
 import org.apache.iceberg.index.LeafFileEntry;
 import org.apache.iceberg.index.LeafFileReader;
 import org.apache.iceberg.index.TrackingFileEntry;
-import org.apache.iceberg.index.TrackingFileReader;
 import org.apache.iceberg.index.TransformFunction;
 import org.apache.iceberg.index.TransformFunctions;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
@@ -92,16 +92,44 @@ class ScalarIndexFileResolver {
           Expression.Operation.GT_EQ);
 
   private final Table table;
+  private final FileIO io;
   private final Schema schema;
   private final boolean caseSensitive;
   private final List<Expression> filters;
+  private final Supplier<List<IndexMetadata>> indexLister;
+  private final ScalarIndexFileCache fileCache;
 
   ScalarIndexFileResolver(
-      Table table, Schema schema, boolean caseSensitive, List<Expression> filters) {
+      Table table,
+      Schema schema,
+      boolean caseSensitive,
+      List<Expression> filters,
+      long listingCacheTtlMs) {
+    this(
+        table,
+        table.io(),
+        schema,
+        caseSensitive,
+        filters,
+        () -> SparkIndexCatalogs.get().listIndexes(table, listingCacheTtlMs),
+        ScalarIndexFileCache.shared());
+  }
+
+  ScalarIndexFileResolver(
+      Table table,
+      FileIO io,
+      Schema schema,
+      boolean caseSensitive,
+      List<Expression> filters,
+      Supplier<List<IndexMetadata>> indexLister,
+      ScalarIndexFileCache fileCache) {
     this.table = table;
+    this.io = io;
     this.schema = schema;
     this.caseSensitive = caseSensitive;
     this.filters = filters;
+    this.indexLister = indexLister;
+    this.fileCache = fileCache;
   }
 
   /**
@@ -152,30 +180,27 @@ class ScalarIndexFileResolver {
   }
 
   private List<IndexMetadata> listIndexes() {
-    // Derived from the core table name, exactly as BuildScalarIndexProcedure derives it, so both
-    // sides address the same registry entries.
-    TableIdentifier tableIdentifier = TableIdentifier.parse(table.name());
     try {
-      return SparkIndexCatalogs.get().catalogFor(table).listIndexes(tableIdentifier);
+      return indexLister.get();
     } catch (RuntimeException e) {
       LOG.warn(
           "Failed to list SCALAR indexes for table {}, falling back to normal planning: {}",
-          tableIdentifier,
+          table.name(),
           e.getMessage());
       return null;
     }
   }
 
   private List<TrackingFileEntry> readTrackingFile(String trackingFileLocation) {
-    return TrackingFileReader.readAll(table.io().newInputFile(trackingFileLocation));
+    return fileCache.trackingEntries(io, trackingFileLocation);
   }
 
   private Type storedKeyType(TrackingFileEntry leaf, Types.NestedField keyField) {
-    return LeafFileReader.storedKeyType(newLeafInputFile(leaf), keyField);
+    return fileCache.storedKeyType(io, leaf, keyField);
   }
 
   private InputFile newLeafInputFile(TrackingFileEntry leaf) {
-    return table.io().newInputFile(leaf.location());
+    return fileCache.leafInputFile(io, leaf);
   }
 
   /**

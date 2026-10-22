@@ -25,17 +25,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.File;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.hadoop.HadoopTables;
+import org.apache.iceberg.index.IndexMetadata;
 import org.apache.iceberg.index.TrackingFileEntry;
+import org.apache.iceberg.index.TrackingFileReader;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
+import org.apache.iceberg.relocated.com.google.common.collect.Iterables;
+import org.apache.iceberg.spark.CountingFileIO;
+import org.apache.iceberg.spark.SparkIndexCatalogs;
 import org.apache.iceberg.spark.source.ScalarIndexFileResolver.Resolution;
 import org.apache.iceberg.spark.source.ScalarIndexFileResolver.TransformValueRange;
 import org.apache.iceberg.types.Types;
@@ -98,8 +105,12 @@ class TestScalarIndexFileResolver {
   }
 
   private Resolution resolve(Expression... filters) {
-    return new ScalarIndexFileResolver(table, table.schema(), true, ImmutableList.copyOf(filters))
-        .resolve(table.currentSnapshot());
+    return resolver(filters).resolve(table.currentSnapshot());
+  }
+
+  private ScalarIndexFileResolver resolver(Expression... filters) {
+    return new ScalarIndexFileResolver(
+        table, table.schema(), true, ImmutableList.copyOf(filters), 0L /* no listing cache */);
   }
 
   @Test
@@ -211,12 +222,7 @@ class TestScalarIndexFileResolver {
     buildDataIndex("HASH");
 
     Resolution resolution =
-        new ScalarIndexFileResolver(
-                table,
-                table.schema(),
-                true,
-                ImmutableList.of(Expressions.equal("data", "does-not-exist")))
-            .resolve(table.snapshot(beforeIndex));
+        resolver(Expressions.equal("data", "does-not-exist")).resolve(table.snapshot(beforeIndex));
 
     assertThat(resolution).isNull();
   }
@@ -258,6 +264,50 @@ class TestScalarIndexFileResolver {
         .commit();
 
     assertThat(resolve(Expressions.equal("data", "bbb"))).isNull();
+  }
+
+  @Test
+  void repeatLookupReusesTheTrackingFileAndLeafMetadata() {
+    buildDataIndex("HASH");
+    IndexMetadata index =
+        Iterables.getOnlyElement(
+            SparkIndexCatalogs.get()
+                .catalogFor(table)
+                .listIndexes(TableIdentifier.parse(table.name())));
+    String trackingFile = index.currentSnapshot().trackingFile();
+    String leafFile =
+        Iterables.getOnlyElement(TrackingFileReader.readAll(table.io().newInputFile(trackingFile)))
+            .location();
+
+    CountingFileIO countingIO = new CountingFileIO();
+    AtomicInteger listings = new AtomicInteger();
+    ScalarIndexFileResolver resolver =
+        new ScalarIndexFileResolver(
+            table,
+            countingIO,
+            table.schema(),
+            true,
+            ImmutableList.of(Expressions.equal("data", "bbb")),
+            () -> {
+              listings.incrementAndGet();
+              return ImmutableList.of(index);
+            },
+            new ScalarIndexFileCache());
+
+    Resolution first = resolver.resolve(table.currentSnapshot());
+    int leafStreamsAfterFirstLookup = countingIO.streamsOpened(leafFile);
+    Resolution second = resolver.resolve(table.currentSnapshot());
+    int leafStreamsForSecondLookup =
+        countingIO.streamsOpened(leafFile) - leafStreamsAfterFirstLookup;
+
+    assertThat(first.matchedFilePaths()).containsExactly(fileB.location());
+    assertThat(second.matchedFilePaths()).containsExactly(fileB.location());
+    assertThat(listings).hasValue(2);
+    assertThat(countingIO.streamsOpened(trackingFile)).isEqualTo(1);
+    // The first lookup opens the leaf for the key-type check and for the lookup; the second only
+    // opens it to read matching row groups, because the key type and footer are cached.
+    assertThat(leafStreamsAfterFirstLookup).isEqualTo(2);
+    assertThat(leafStreamsForSecondLookup).isEqualTo(1);
   }
 
   @Test

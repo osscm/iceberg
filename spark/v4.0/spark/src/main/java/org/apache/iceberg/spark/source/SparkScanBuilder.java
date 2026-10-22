@@ -203,7 +203,8 @@ public class SparkScanBuilder
     // to, before pruneColumns narrows the projection.
     this.scalarIndexResolver =
         table instanceof BaseTable
-            ? new ScalarIndexFileResolver(table, schema, caseSensitive, expressions)
+            ? new ScalarIndexFileResolver(
+                table, schema, caseSensitive, expressions, readConf.scalarIndexListingCacheTtlMs())
             : null;
     this.scalarIndexResolved = false;
     this.scalarIndexResolution = null;
