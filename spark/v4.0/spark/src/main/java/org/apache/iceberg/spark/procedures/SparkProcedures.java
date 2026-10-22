@@ -60,6 +60,7 @@ public class SparkProcedures {
     mapBuilder.put(ComputeTableStatsProcedure.NAME, ComputeTableStatsProcedure::builder);
     mapBuilder.put(ComputePartitionStatsProcedure.NAME, ComputePartitionStatsProcedure::builder);
     mapBuilder.put(RewriteTablePathProcedure.NAME, RewriteTablePathProcedure::builder);
+    mapBuilder.put(BuildScalarIndexProcedure.NAME, BuildScalarIndexProcedure::builder);
     return mapBuilder.build();
   }
 

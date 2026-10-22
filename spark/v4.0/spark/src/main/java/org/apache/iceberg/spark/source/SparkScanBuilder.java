@@ -105,6 +105,9 @@ public class SparkScanBuilder
   private List<Expression> filterExpressions = null;
   private Predicate[] pushedPredicates = NO_PREDICATES;
   private Integer limit = null;
+  private ScalarIndexFileResolver scalarIndexResolver = null;
+  private boolean scalarIndexResolved = false;
+  private Set<String> scalarIndexFilePaths = null;
 
   SparkScanBuilder(
       SparkSession spark,
@@ -190,8 +193,20 @@ public class SparkScanBuilder
 
     this.filterExpressions = expressions;
     this.pushedPredicates = pushableFilters.toArray(new Predicate[0]);
+    resetScalarIndexResolution(expressions);
 
     return postScanFilters.toArray(new Predicate[0]);
+  }
+
+  private void resetScalarIndexResolution(List<Expression> expressions) {
+    // Metadata tables are never indexed. The resolver captures the schema the filters were bound
+    // to, before pruneColumns narrows the projection.
+    this.scalarIndexResolver =
+        table instanceof BaseTable
+            ? new ScalarIndexFileResolver(table, schema, caseSensitive, expressions)
+            : null;
+    this.scalarIndexResolved = false;
+    this.scalarIndexFilePaths = null;
   }
 
   private boolean unpartitioned() {
@@ -411,11 +426,35 @@ public class SparkScanBuilder
     return new SparkBatchQueryScan(
         spark,
         table,
-        buildIcebergBatchScan(false /* not include Column Stats */, expectedSchema),
+        withScalarIndexPruning(
+            buildIcebergBatchScan(false /* not include Column Stats */, expectedSchema)),
         readConf,
         expectedSchema,
         filterExpressions,
         metricsReporter::scanReport);
+  }
+
+  // Applied only to the plain batch scan built by build(). Incremental, changelog, merge-on-read,
+  // copy-on-write, and aggregate push-down scans are planned without SCALAR index pruning.
+  private org.apache.iceberg.Scan withScalarIndexPruning(org.apache.iceberg.Scan scan) {
+    if (scalarIndexResolver == null || !(scan instanceof BatchScan)) {
+      return scan;
+    }
+
+    BatchScan batchScan = (BatchScan) scan;
+    Set<String> filePaths = scalarIndexFilePaths(batchScan);
+    return filePaths != null ? new FileScanTaskFilteringScan(batchScan, filePaths) : scan;
+  }
+
+  private Set<String> scalarIndexFilePaths(BatchScan scan) {
+    if (!scalarIndexResolved) {
+      // Resolved against the snapshot the scan reads (time travel, branch, or tag) rather than
+      // the table's current snapshot, and memoized because Spark calls build() more than once.
+      this.scalarIndexFilePaths = scalarIndexResolver.resolve(scan.snapshot());
+      this.scalarIndexResolved = true;
+    }
+
+    return scalarIndexFilePaths;
   }
 
   private org.apache.iceberg.Scan buildIcebergBatchScan(boolean withStats, Schema expectedSchema) {
