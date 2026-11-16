@@ -1,0 +1,120 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "org.apache.iceberg",
+    "module": "iceberg-common",
+    "version": "1.10.0-mv1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.14.3"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 11,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "files": [
+        {
+          "name": "iceberg-common-1.10.0-mv1.jar",
+          "url": "iceberg-common-1.10.0-mv1.jar",
+          "size": 31726,
+          "sha512": "8b96a7e1611d5471c248e1d0549faaf636f4a770dedf53480461f0b2714b95b70780bae74bc426fb8f9de407f6eff797688828de46333aaa8d1179dd72b9cccb",
+          "sha256": "d3b9876a894eb745be7458e2e5b0ddb02c476f77483222ca4a1894d8229e92d3",
+          "sha1": "9e4b673c4cab3abfddb967e7e750c36a6370a0e2",
+          "md5": "5c89acb894967fb5dc1263d1ff6385ca"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 11,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "org.slf4j",
+          "module": "slf4j-api",
+          "version": {
+            "requires": "2.0.17"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-bundled-guava",
+          "version": {
+            "requires": "1.10.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            }
+          ]
+        }
+      ],
+      "files": [
+        {
+          "name": "iceberg-common-1.10.0-mv1.jar",
+          "url": "iceberg-common-1.10.0-mv1.jar",
+          "size": 31726,
+          "sha512": "8b96a7e1611d5471c248e1d0549faaf636f4a770dedf53480461f0b2714b95b70780bae74bc426fb8f9de407f6eff797688828de46333aaa8d1179dd72b9cccb",
+          "sha256": "d3b9876a894eb745be7458e2e5b0ddb02c476f77483222ca4a1894d8229e92d3",
+          "sha1": "9e4b673c4cab3abfddb967e7e750c36a6370a0e2",
+          "md5": "5c89acb894967fb5dc1263d1ff6385ca"
+        }
+      ]
+    }
+  ]
+}
