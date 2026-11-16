@@ -19,6 +19,7 @@
 package org.apache.iceberg.view;
 
 import javax.annotation.Nullable;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.immutables.value.Value;
 
 /**
@@ -48,5 +49,5 @@ interface BaseViewVersion extends ViewVersion {
 
   @Override
   @Nullable
-  StorageTableIdentifier storageTable();
+  TableIdentifier storageTable();
 }

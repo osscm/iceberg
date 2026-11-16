@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.iceberg.catalog.Namespace;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.junit.jupiter.api.Test;
 
@@ -120,6 +121,81 @@ public class TestViewVersionParser {
   }
 
   @Test
+  public void testViewVersionWithStorageTable() {
+    SQLViewRepresentation representation =
+        ImmutableSQLViewRepresentation.builder()
+            .sql("select * from events")
+            .dialect("spark")
+            .build();
+
+    TableIdentifier storageTable = TableIdentifier.of(Namespace.of("default"), "mv__storage");
+
+    ViewVersion viewVersion =
+        ImmutableViewVersion.builder()
+            .versionId(1)
+            .timestampMillis(12345)
+            .addRepresentations(representation)
+            .summary(ImmutableMap.of("engine-name", "Spark"))
+            .defaultNamespace(Namespace.of("default"))
+            .defaultCatalog("prod")
+            .schemaId(1)
+            .storageTable(storageTable)
+            .build();
+
+    String json = ViewVersionParser.toJson(viewVersion);
+    assertThat(json).contains("\"storage-table\":{");
+    assertThat(json).contains("\"namespace\":[\"default\"]");
+    assertThat(json).contains("\"name\":\"mv__storage\"");
+
+    ViewVersion parsed = ViewVersionParser.fromJson(json);
+    assertThat(parsed.storageTable()).isNotNull();
+    assertThat(parsed.storageTable().namespace()).isEqualTo(Namespace.of("default"));
+    assertThat(parsed.storageTable().name()).isEqualTo("mv__storage");
+    assertThat(parsed).isEqualTo(viewVersion);
+  }
+
+  @Test
+  public void testViewVersionWithoutStorageTable() {
+    SQLViewRepresentation representation =
+        ImmutableSQLViewRepresentation.builder()
+            .sql("select * from events")
+            .dialect("spark")
+            .build();
+
+    ViewVersion viewVersion =
+        ImmutableViewVersion.builder()
+            .versionId(1)
+            .timestampMillis(12345)
+            .addRepresentations(representation)
+            .summary(ImmutableMap.of())
+            .defaultNamespace(Namespace.of("default"))
+            .schemaId(1)
+            .build();
+
+    String json = ViewVersionParser.toJson(viewVersion);
+    assertThat(json).doesNotContain("storage-table");
+
+    ViewVersion parsed = ViewVersionParser.fromJson(json);
+    assertThat(parsed.storageTable()).isNull();
+  }
+
+  @Test
+  public void testParseViewVersionWithStorageTableJson() {
+    String json =
+        "{\"version-id\":1,\"timestamp-ms\":1573518431292,\"schema-id\":1,"
+            + "\"summary\":{\"engine-name\":\"Spark\",\"engine-version\":\"3.4.1\"},"
+            + "\"default-catalog\":\"prod\",\"default-namespace\":[\"default\"],"
+            + "\"representations\":[{\"type\":\"sql\",\"sql\":\"SELECT COUNT(1) FROM events\","
+            + "\"dialect\":\"spark\"}],"
+            + "\"storage-table\":{\"namespace\":[\"default\"],\"name\":\"event_agg_mv__storage\"}}";
+
+    ViewVersion parsed = ViewVersionParser.fromJson(json);
+    assertThat(parsed.storageTable()).isNotNull();
+    assertThat(parsed.storageTable().namespace()).isEqualTo(Namespace.of("default"));
+    assertThat(parsed.storageTable().name()).isEqualTo("event_agg_mv__storage");
+  }
+
+  @Test
   public void missingDefaultCatalog() {
     assertThatThrownBy(
             () ->
@@ -127,7 +203,7 @@ public class TestViewVersionParser {
                     "{\"version-id\":1,\"timestamp-ms\":12345,\"schema-id\":1,"
                         + "\"summary\":{\"operation\":\"create\"},\"representations\":[]}"))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Cannot parse missing field: default-namespace");
+        .hasMessage("Cannot parse missing list: default-namespace");
   }
 
   @Test
@@ -146,115 +222,5 @@ public class TestViewVersionParser {
     assertThatThrownBy(() -> ViewVersionParser.fromJson(missingRepresentations))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("Cannot parse missing field: representations");
-  }
-
-  @Test
-  public void testParseViewVersionWithStorageTable() {
-    String serializedViewVersion =
-        "{\"version-id\":1,\"timestamp-ms\":12345,\"schema-id\":1,"
-            + "\"summary\":{\"user\":\"some-user\"},\"default-namespace\":[\"one\",\"two\"],"
-            + "\"representations\":[],"
-            + "\"storage-table\":{\"namespace\":[\"db\",\"schema\"],\"name\":\"mv_storage\"}}";
-
-    ViewVersion viewVersion = ViewVersionParser.fromJson(serializedViewVersion);
-
-    assertThat(viewVersion.storageTable()).isNotNull();
-    assertThat(viewVersion.storageTable().namespace())
-        .isEqualTo(Namespace.of("db", "schema"));
-    assertThat(viewVersion.storageTable().name()).isEqualTo("mv_storage");
-    assertThat(viewVersion.storageTable().catalog()).isNull();
-    assertThat(viewVersion.storageTable().hasCatalog()).isFalse();
-  }
-
-  @Test
-  public void testParseViewVersionWithStorageTableAndCatalog() {
-    String serializedViewVersion =
-        "{\"version-id\":1,\"timestamp-ms\":12345,\"schema-id\":1,"
-            + "\"summary\":{\"user\":\"some-user\"},\"default-namespace\":[\"one\",\"two\"],"
-            + "\"representations\":[],"
-            + "\"storage-table\":{\"namespace\":[\"db\"],\"name\":\"mv_storage\",\"catalog\":\"my_catalog\"}}";
-
-    ViewVersion viewVersion = ViewVersionParser.fromJson(serializedViewVersion);
-
-    assertThat(viewVersion.storageTable()).isNotNull();
-    assertThat(viewVersion.storageTable().namespace()).isEqualTo(Namespace.of("db"));
-    assertThat(viewVersion.storageTable().name()).isEqualTo("mv_storage");
-    assertThat(viewVersion.storageTable().catalog()).isEqualTo("my_catalog");
-    assertThat(viewVersion.storageTable().hasCatalog()).isTrue();
-  }
-
-  @Test
-  public void testSerializeViewVersionWithStorageTable() {
-    ViewVersion viewVersion =
-        ImmutableViewVersion.builder()
-            .versionId(1)
-            .timestampMillis(12345)
-            .schemaId(1)
-            .summary(ImmutableMap.of("user", "some-user"))
-            .defaultNamespace(Namespace.of("one", "two"))
-            .storageTable(StorageTableIdentifier.of(Namespace.of("db", "schema"), "mv_storage"))
-            .build();
-
-    String json = ViewVersionParser.toJson(viewVersion);
-
-    assertThat(json).contains("\"storage-table\"");
-    assertThat(json).contains("\"name\":\"mv_storage\"");
-    assertThat(json).contains("\"db\",\"schema\"");
-    assertThat(json).doesNotContain("\"catalog\"");
-  }
-
-  @Test
-  public void testSerializeViewVersionWithStorageTableAndCatalog() {
-    ViewVersion viewVersion =
-        ImmutableViewVersion.builder()
-            .versionId(1)
-            .timestampMillis(12345)
-            .schemaId(1)
-            .summary(ImmutableMap.of("user", "some-user"))
-            .defaultNamespace(Namespace.of("one", "two"))
-            .storageTable(
-                StorageTableIdentifier.of("my_catalog", Namespace.of("db"), "mv_storage"))
-            .build();
-
-    String json = ViewVersionParser.toJson(viewVersion);
-
-    assertThat(json).contains("\"storage-table\"");
-    assertThat(json).contains("\"name\":\"mv_storage\"");
-    assertThat(json).contains("\"catalog\":\"my_catalog\"");
-  }
-
-  @Test
-  public void testRoundTripStorageTable() {
-    StorageTableIdentifier storageTable =
-        StorageTableIdentifier.of("my_catalog", Namespace.of("db", "schema"), "mv_storage");
-
-    ViewVersion original =
-        ImmutableViewVersion.builder()
-            .versionId(2)
-            .timestampMillis(99999)
-            .schemaId(1)
-            .summary(ImmutableMap.of("engine", "spark"))
-            .defaultNamespace(Namespace.of("default"))
-            .storageTable(storageTable)
-            .build();
-
-    ViewVersion roundTripped = ViewVersionParser.fromJson(ViewVersionParser.toJson(original));
-
-    assertThat(roundTripped.storageTable()).isEqualTo(storageTable);
-    assertThat(roundTripped.storageTable().catalog()).isEqualTo("my_catalog");
-    assertThat(roundTripped.storageTable().namespace()).isEqualTo(Namespace.of("db", "schema"));
-    assertThat(roundTripped.storageTable().name()).isEqualTo("mv_storage");
-  }
-
-  @Test
-  public void testNoStorageTableForPlainView() {
-    String serializedViewVersion =
-        "{\"version-id\":1,\"timestamp-ms\":12345,\"schema-id\":1,"
-            + "\"summary\":{\"user\":\"some-user\"},\"default-namespace\":[\"one\",\"two\"],"
-            + "\"representations\":[]}";
-
-    ViewVersion viewVersion = ViewVersionParser.fromJson(serializedViewVersion);
-
-    assertThat(viewVersion.storageTable()).isNull();
   }
 }

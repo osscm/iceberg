@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
 import org.apache.iceberg.catalog.Namespace;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.util.JsonUtil;
@@ -38,9 +39,8 @@ public class ViewVersionParser {
   private static final String DEFAULT_CATALOG = "default-catalog";
   private static final String DEFAULT_NAMESPACE = "default-namespace";
   private static final String STORAGE_TABLE = "storage-table";
-  private static final String STORAGE_TABLE_NAMESPACE = "namespace";
-  private static final String STORAGE_TABLE_NAME = "name";
-  private static final String STORAGE_TABLE_CATALOG = "catalog";
+  private static final String NAMESPACE = "namespace";
+  private static final String NAME = "name";
 
   private ViewVersionParser() {}
 
@@ -67,16 +67,10 @@ public class ViewVersionParser {
     generator.writeEndArray();
 
     if (version.storageTable() != null) {
-      StorageTableIdentifier storageTable = version.storageTable();
       generator.writeObjectFieldStart(STORAGE_TABLE);
       JsonUtil.writeStringArray(
-          STORAGE_TABLE_NAMESPACE,
-          Arrays.asList(storageTable.namespace().levels()),
-          generator);
-      generator.writeStringField(STORAGE_TABLE_NAME, storageTable.name());
-      if (storageTable.hasCatalog()) {
-        generator.writeStringField(STORAGE_TABLE_CATALOG, storageTable.catalog());
-      }
+          NAMESPACE, Arrays.asList(version.storageTable().namespace().levels()), generator);
+      generator.writeStringField(NAME, version.storageTable().name());
       generator.writeEndObject();
     }
 
@@ -117,29 +111,24 @@ public class ViewVersionParser {
     Namespace defaultNamespace =
         Namespace.of(JsonUtil.getStringArray(JsonUtil.get(DEFAULT_NAMESPACE, node)));
 
-    StorageTableIdentifier storageTable = null;
+    ImmutableViewVersion.Builder builder =
+        ImmutableViewVersion.builder()
+            .versionId(versionId)
+            .timestampMillis(timestamp)
+            .schemaId(schemaId)
+            .summary(summary)
+            .defaultNamespace(defaultNamespace)
+            .defaultCatalog(defaultCatalog)
+            .representations(representations.build());
+
     if (node.has(STORAGE_TABLE)) {
       JsonNode storageTableNode = node.get(STORAGE_TABLE);
       Namespace storageNamespace =
-          Namespace.of(JsonUtil.getStringArray(JsonUtil.get(STORAGE_TABLE_NAMESPACE, storageTableNode)));
-      String storageTableName = JsonUtil.getString(STORAGE_TABLE_NAME, storageTableNode);
-      String storageTableCatalog = JsonUtil.getStringOrNull(STORAGE_TABLE_CATALOG, storageTableNode);
-      if (storageTableCatalog != null) {
-        storageTable = StorageTableIdentifier.of(storageTableCatalog, storageNamespace, storageTableName);
-      } else {
-        storageTable = StorageTableIdentifier.of(storageNamespace, storageTableName);
-      }
+          Namespace.of(JsonUtil.getStringArray(JsonUtil.get(NAMESPACE, storageTableNode)));
+      String storageTableName = JsonUtil.getString(NAME, storageTableNode);
+      builder.storageTable(TableIdentifier.of(storageNamespace, storageTableName));
     }
 
-    return ImmutableViewVersion.builder()
-        .versionId(versionId)
-        .timestampMillis(timestamp)
-        .schemaId(schemaId)
-        .summary(summary)
-        .defaultNamespace(defaultNamespace)
-        .defaultCatalog(defaultCatalog)
-        .representations(representations.build())
-        .storageTable(storageTable)
-        .build();
+    return builder.build();
   }
 }
