@@ -1,0 +1,430 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "org.apache.iceberg",
+    "module": "iceberg-aws",
+    "version": "1.12.0-mv1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.14.5"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-api",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        }
+      ],
+      "files": [
+        {
+          "name": "iceberg-aws-1.12.0-mv1.jar",
+          "url": "iceberg-aws-1.12.0-mv1.jar",
+          "size": 210488,
+          "sha512": "0096768e9a19886e1d7f574cfe0f6401fdfd68419e8bfeb30651706105c38cdd9b226553ebc316395cf350357472f315c77568a4c0df4b49beb3f4c9b7037fec",
+          "sha256": "5cb62cf74151de0373bb263e5301d91da340d1d10138d2ef5143b8a35093fa64",
+          "sha1": "7f68c6b7a50b3492cc9b94491c241e629ed22fb5",
+          "md5": "57efdb365135765dcacaa6aac0b4fa27"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "org.slf4j",
+          "module": "slf4j-api",
+          "version": {
+            "requires": "2.0.18"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-bundled-guava",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-common",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-core",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "com.github.ben-manes.caffeine",
+          "module": "caffeine",
+          "version": {
+            "requires": "3.2.4"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "dev.failsafe",
+          "module": "failsafe",
+          "version": {
+            "requires": "3.3.2"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "com.fasterxml.jackson",
+          "module": "jackson-bom",
+          "version": {
+            "requires": "2.22.2"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ],
+          "attributes": {
+            "org.gradle.category": "platform"
+          }
+        },
+        {
+          "group": "com.fasterxml.jackson.core",
+          "module": "jackson-core",
+          "version": {
+            "requires": "2.22.2"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "com.fasterxml.jackson.core",
+          "module": "jackson-databind",
+          "version": {
+            "requires": "2.22.2"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-api",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        }
+      ],
+      "files": [
+        {
+          "name": "iceberg-aws-1.12.0-mv1.jar",
+          "url": "iceberg-aws-1.12.0-mv1.jar",
+          "size": 210488,
+          "sha512": "0096768e9a19886e1d7f574cfe0f6401fdfd68419e8bfeb30651706105c38cdd9b226553ebc316395cf350357472f315c77568a4c0df4b49beb3f4c9b7037fec",
+          "sha256": "5cb62cf74151de0373bb263e5301d91da340d1d10138d2ef5143b8a35093fa64",
+          "sha1": "7f68c6b7a50b3492cc9b94491c241e629ed22fb5",
+          "md5": "57efdb365135765dcacaa6aac0b4fa27"
+        }
+      ]
+    }
+  ]
+}

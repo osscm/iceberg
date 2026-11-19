@@ -1,0 +1,38 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "org.apache.iceberg",
+    "module": "iceberg-bundled-guava",
+    "version": "1.12.0-mv1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.14.5"
+    }
+  },
+  "variants": [
+    {
+      "name": "shadowRuntimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "shadowed",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "iceberg-bundled-guava-1.12.0-mv1.jar",
+          "url": "iceberg-bundled-guava-1.12.0-mv1.jar",
+          "size": 1768582,
+          "sha512": "481e0a988e4c16deaf4083b2028438ff3b5ff263b5e835c6e239e8a0be32e8386f8c2bbb360604b32d1a676289622d5a5de2bbc1266287c58cc6fd35339aaf98",
+          "sha256": "d9baed5cb851adffcfb8f49883788c31aa781fd982cdc6fc1343e62ff79d7844",
+          "sha1": "eeb8934e4d00ba01e7233d3cefb6174767cf07a5",
+          "md5": "45de72b0ba52e214029ba7b37169dc7f"
+        }
+      ]
+    }
+  ]
+}

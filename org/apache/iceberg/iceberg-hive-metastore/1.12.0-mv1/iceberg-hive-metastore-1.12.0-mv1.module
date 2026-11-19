@@ -1,0 +1,295 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "org.apache.iceberg",
+    "module": "iceberg-hive-metastore",
+    "version": "1.12.0-mv1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.14.5"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-api",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        }
+      ],
+      "files": [
+        {
+          "name": "iceberg-hive-metastore-1.12.0-mv1.jar",
+          "url": "iceberg-hive-metastore-1.12.0-mv1.jar",
+          "size": 99449,
+          "sha512": "6f157082eb33f9a338bdb2678d61a37e7002d99cac64e03f778930fdb3b22b3391db7bfdaebcbefb92d36b1dfe989d0dbb1e842dce3d33e4f213f6f81c700883",
+          "sha256": "112e55dbef966708759658c3a5f02ccae6ddc10d6c9fec63201bd8bf9f5d9f9f",
+          "sha1": "0cb06778d19c94d0f43c7b5441e4b1a4303aa1aa",
+          "md5": "021079cb3f21beaccaad09524fab00e3"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "org.slf4j",
+          "module": "slf4j-api",
+          "version": {
+            "requires": "2.0.18"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-bundled-guava",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-core",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-common",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "com.github.ben-manes.caffeine",
+          "module": "caffeine",
+          "version": {
+            "requires": "3.2.4"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        },
+        {
+          "group": "org.apache.iceberg",
+          "module": "iceberg-api",
+          "version": {
+            "requires": "1.12.0-mv1"
+          },
+          "excludes": [
+            {
+              "group": "org.slf4j",
+              "module": "slf4j-log4j12"
+            },
+            {
+              "group": "org.mortbay.jetty",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey",
+              "module": "*"
+            },
+            {
+              "group": "com.sun.jersey.contribs",
+              "module": "*"
+            },
+            {
+              "group": "org.pentaho",
+              "module": "pentaho-aggdesigner-algorithm"
+            },
+            {
+              "group": "org.jetbrains",
+              "module": "annotations"
+            }
+          ]
+        }
+      ],
+      "files": [
+        {
+          "name": "iceberg-hive-metastore-1.12.0-mv1.jar",
+          "url": "iceberg-hive-metastore-1.12.0-mv1.jar",
+          "size": 99449,
+          "sha512": "6f157082eb33f9a338bdb2678d61a37e7002d99cac64e03f778930fdb3b22b3391db7bfdaebcbefb92d36b1dfe989d0dbb1e842dce3d33e4f213f6f81c700883",
+          "sha256": "112e55dbef966708759658c3a5f02ccae6ddc10d6c9fec63201bd8bf9f5d9f9f",
+          "sha1": "0cb06778d19c94d0f43c7b5441e4b1a4303aa1aa",
+          "md5": "021079cb3f21beaccaad09524fab00e3"
+        }
+      ]
+    }
+  ]
+}
